@@ -18,6 +18,7 @@
 
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE BangPatterns #-}
 
 module Foundation.Parser
     ( Parser(..)
@@ -37,6 +38,10 @@ module Foundation.Parser
     , skip
     , skipWhile
     , skipAll
+    -- utils
+    , optional
+    , many, many'
+    , atLeast, atLeast'
     ) where
 
 import           Control.Applicative (Alternative, empty, (<|>))
@@ -254,3 +259,38 @@ skipWhile p = Parser $ \buf err ok ->
 -- stream
 skipAll :: Sequential input => Parser input ()
 skipAll = Parser $ \buf err ok -> runParser flushAll buf err ok
+
+-- | make parsing an element optional
+--
+-- > newtype HELP = HELP (Maybe String) -- the SMTP help command
+-- > parserHELP :: Parser (UArray Word8) HELP
+-- > parserHELP = do
+-- >    elements "HELP"
+-- >    mstr <- (HELP <$> optional (takeWhileNotCRLF))
+-- >    elements "\r\n"
+-- >    return $ HELP mstr
+--
+optional :: Parser input a -> Parser input (Maybe a)
+optional p = (Just <$> p) <|> pure Nothing
+
+-- | apply the parser 0 or more times
+--
+-- > many anyElement === takeAll
+many :: (Sequential c, Item c ~ a) => Parser input a -> Parser input c
+many !p = (p >>= \v -> mappend (singleton v) <$> many p) <|> pure mempty
+
+-- | same as `many` but specialised for list
+many' :: Parser input a -> Parser input [a]
+many' = many
+
+-- | apply the parser at least a certain amount of time
+--
+-- > (head <$> atLeast 1 p) === anyElement
+--
+atLeast :: (Sequential c, Item c ~ a) => Int -> Parser input a -> Parser input c
+atLeast  0 !p = many p
+atLeast !n !p = p >>= \x -> mappend (singleton x) <$> atLeast (n - 1) p
+
+-- | same as `atLeast` but specialised for list
+atLeast' :: Int -> Parser input a -> Parser input [a]
+atLeast' = atLeast
